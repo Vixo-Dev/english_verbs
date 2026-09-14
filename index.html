@@ -182,6 +182,15 @@
   .segmented button:last-child{ border-right:none; }
   .segmented button.active{ background: var(--ink); color: var(--paper); }
 
+  .block-picker{ display:flex; gap:.6rem; flex-wrap:wrap; }
+  .block-picker button{
+    font-family: var(--mono); font-size:.85rem; padding:.7rem 1.1rem;
+    border:1px solid var(--ink); border-radius:8px; background: var(--paper-hi); color: var(--ink);
+    cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:.2rem; min-width:100px;
+  }
+  .block-picker button:hover{ background: var(--paper-line); }
+  .block-picker button .best{ font-size:.7rem; color: var(--ink-soft); }
+
   /* ---------- Stats ---------- */
   .stats{ display:flex; gap:1.4rem; margin:1rem 0 1.4rem; flex-wrap:wrap; }
   .stat{ font-size:.78rem; color: var(--ink-soft); }
@@ -260,6 +269,7 @@
   <button class="tab-btn active" data-view="regular">Regulares <span class="n">(490)</span></button>
   <button class="tab-btn" data-view="irregular">Irregulares <span class="n">(194)</span></button>
   <button class="tab-btn" data-view="practice">Práctica</button>
+  <button class="tab-btn" data-view="eval">Evaluación por bloques</button>
 </nav>
 
 <main>
@@ -352,6 +362,71 @@
 
       <div class="reset-row">
         <button type="button" class="ghost" id="btn-reset">Reiniciar mi progreso guardado</button>
+      </div>
+    </section>
+
+    <!-- ===================== EVALUATION BY BLOCKS (irregular only) ===================== -->
+    <section id="view-eval" class="view">
+      <h2>Evaluación de verbos irregulares por bloques</h2>
+      <p class="hint">Elige un bloque de 50 verbos irregulares. Solo se te da el <b>significado en español</b>: tienes que recordar el verbo y escribir su <b>past simple</b>, <b>past participle</b> y <b>gerund</b>.</p>
+
+      <div id="eval-picker">
+        <div class="block-picker" id="eval-block-buttons"></div>
+      </div>
+
+      <div id="eval-quiz" style="display:none;">
+        <div class="stats">
+          <div class="stat"><b id="eval-progress">0 / 0</b>progreso en el bloque</div>
+          <div class="stat"><b id="eval-correct">0</b>aciertos en este bloque</div>
+        </div>
+
+        <div class="practice-card">
+          <span class="tag-chip irregular">irregular</span>
+          <div class="practice-inf" id="eval-es" style="font-size:1.5rem;">aguantar / soportar a alguien</div>
+
+          <form class="practice-form" id="eval-form">
+            <div class="field" id="eval-field-past">
+              <label for="eval-input-past">Past simple</label>
+              <input type="text" id="eval-input-past" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <div class="field-note" id="eval-note-past"></div>
+            </div>
+            <div class="field" id="eval-field-pp">
+              <label for="eval-input-pp">Past participle</label>
+              <input type="text" id="eval-input-pp" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <div class="field-note" id="eval-note-pp"></div>
+            </div>
+            <div class="field" id="eval-field-ger">
+              <label for="eval-input-ger">Gerund (verb + -ing)</label>
+              <input type="text" id="eval-input-ger" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <div class="field-note" id="eval-note-ger"></div>
+            </div>
+
+            <div class="result-banner" id="eval-result-banner"></div>
+
+            <div class="practice-actions">
+              <button type="submit" class="primary" id="eval-btn-check">Revisar</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="reset-row">
+          <button type="button" class="ghost" id="eval-btn-change-block">← Elegir otro bloque</button>
+        </div>
+      </div>
+
+      <div id="eval-summary" style="display:none;">
+        <div class="practice-card">
+          <div class="practice-inf" id="eval-summary-score">0/0</div>
+          <div class="practice-es">Bloque terminado</div>
+          <div id="eval-missed-wrap" style="text-align:left; margin-top:1.2rem;">
+            <p class="hint" style="margin-bottom:.5rem;"><b>Verbos que conviene repasar:</b></p>
+            <div id="eval-missed-list" style="font-size:.85rem; line-height:1.7;"></div>
+          </div>
+          <div class="practice-actions" style="justify-content:center;">
+            <button type="button" class="primary" id="eval-btn-retry">Reintentar este bloque</button>
+            <button type="button" class="ghost" id="eval-btn-other-block">Elegir otro bloque</button>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -485,7 +560,7 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
       ger:d.ger, altGer:d.altGer||[]
     })),
     irregular: IRREGULAR.filter(d=>!d.excl).map(d=>({
-      key:'i:'+d.inf, inf:d.inf, es:d.es, type:'irregular',
+      key:'i:'+d.inf, inf:d.inf, es:d.es, type:'irregular', n:d.n,
       past:d.past, pp:d.pp, altPast:d.altPast||[], altPP:d.altPP||[],
       ger:d.ger, altGer:[]
     }))
@@ -646,6 +721,178 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
     saveProgress();
     newVerb();
   });
+
+  /* ---------------- block evaluation (irregular verbs only, 50 at a time) ---------------- */
+  const BLOCK_SIZE = 50;
+  const evalPool = pool.irregular; // already excludes defective verbs like the modal "can"
+  const evalMaxN = evalPool.reduce((m,v)=> Math.max(m, v.n||0), 0);
+  const evalBlocks = [];
+  for(let start=1; start<=evalMaxN; start+=BLOCK_SIZE){
+    const end = Math.min(start+BLOCK_SIZE-1, evalMaxN);
+    evalBlocks.push({start, end, key:start+'-'+end});
+  }
+
+  let evalBest = {};    // blockKey -> {correct, total}
+  let evalState = null; // {block, queue, pos, correct, missed}
+
+  function evalVerbsInBlock(block){
+    return evalPool.filter(v => v.n>=block.start && v.n<=block.end);
+  }
+  function shuffle(arr){
+    const a = arr.slice();
+    for(let i=a.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [a[i],a[j]] = [a[j],a[i]];
+    }
+    return a;
+  }
+
+  function renderBlockPicker(){
+    const wrap = document.getElementById('eval-block-buttons');
+    wrap.innerHTML='';
+    evalBlocks.forEach(block=>{
+      const btn = document.createElement('button');
+      const count = evalVerbsInBlock(block).length;
+      const best = evalBest[block.key];
+      btn.innerHTML = 'Verbos '+block.start+'–'+block.end+
+        (best ? '<span class="best">Mejor: '+best.correct+'/'+best.total+'</span>'
+              : '<span class="best">'+count+' verbos</span>');
+      btn.addEventListener('click', ()=> startBlock(block));
+      wrap.appendChild(btn);
+    });
+  }
+
+  function startBlock(block){
+    evalState = { block, queue: shuffle(evalVerbsInBlock(block)), pos:0, correct:0, missed:[] };
+    document.getElementById('eval-picker').style.display='none';
+    document.getElementById('eval-summary').style.display='none';
+    document.getElementById('eval-quiz').style.display='block';
+    renderEvalVerb();
+  }
+
+  function renderEvalVerb(){
+    const st = evalState;
+    document.getElementById('eval-progress').textContent = (st.pos+1)+' / '+st.queue.length;
+    document.getElementById('eval-correct').textContent = st.correct;
+    document.getElementById('eval-es').textContent = st.queue[st.pos].es;
+
+    ['past','pp','ger'].forEach(f=>{
+      const input = document.getElementById('eval-input-'+f);
+      input.value=''; input.disabled=false;
+      document.getElementById('eval-field-'+f).classList.remove('ok','bad');
+      const note = document.getElementById('eval-note-'+f);
+      note.textContent=''; note.className='field-note';
+    });
+    const banner = document.getElementById('eval-result-banner');
+    banner.className='result-banner'; banner.textContent='';
+    document.getElementById('eval-btn-check').textContent='Revisar';
+    document.getElementById('eval-btn-check').dataset.mode='check';
+    document.getElementById('eval-input-past').focus();
+  }
+
+  function evalCheckAnswer(){
+    const st = evalState;
+    const v = st.queue[st.pos];
+    const userPast = document.getElementById('eval-input-past').value;
+    const userPP = document.getElementById('eval-input-pp').value;
+    const userGer = document.getElementById('eval-input-ger').value;
+
+    const pastOk = normLoose(userPast)===normLoose(v.past) || v.altPast.some(a=>normLoose(userPast)===normLoose(a));
+    const ppOk = normLoose(userPP)===normLoose(v.pp) || v.altPP.some(a=>normLoose(userPP)===normLoose(a));
+    const gerOk = normLoose(userGer)===normLoose(v.ger);
+
+    [['past',pastOk,v.past],['pp',ppOk,v.pp],['ger',gerOk,v.ger]].forEach(function(t){
+      const f=t[0], ok=t[1], correctVal=t[2];
+      const field = document.getElementById('eval-field-'+f);
+      const note = document.getElementById('eval-note-'+f);
+      field.classList.remove('ok','bad'); field.classList.add(ok?'ok':'bad');
+      note.className = 'field-note '+(ok?'ok':'bad');
+      note.textContent = ok ? '✓ correcto' : '✗ era: '+correctVal;
+    });
+
+    const allOk = pastOk && ppOk && gerOk;
+    const banner = document.getElementById('eval-result-banner');
+    banner.classList.add('show');
+    if(allOk){
+      banner.classList.add('ok'); banner.classList.remove('bad');
+      banner.textContent='¡Correcto!';
+      st.correct++;
+    } else {
+      banner.classList.add('bad'); banner.classList.remove('ok');
+      banner.textContent='Casi. Revisa las formas marcadas en rojo.';
+      st.missed.push(v);
+    }
+    document.getElementById('eval-correct').textContent = st.correct;
+
+    ['past','pp','ger'].forEach(f=> document.getElementById('eval-input-'+f).disabled=true);
+    const isLast = st.pos === st.queue.length-1;
+    document.getElementById('eval-btn-check').textContent = isLast ? 'Ver resultado →' : 'Siguiente verbo →';
+    document.getElementById('eval-btn-check').dataset.mode='next';
+  }
+
+  function evalAdvance(){
+    const st = evalState;
+    st.pos++;
+    if(st.pos >= st.queue.length){ finishBlock(); } else { renderEvalVerb(); }
+  }
+
+  function finishBlock(){
+    const st = evalState;
+    document.getElementById('eval-quiz').style.display='none';
+    document.getElementById('eval-summary').style.display='block';
+    document.getElementById('eval-summary-score').textContent = st.correct+'/'+st.queue.length;
+
+    const prevBest = evalBest[st.block.key];
+    if(!prevBest || st.correct > prevBest.correct){
+      evalBest[st.block.key] = {correct: st.correct, total: st.queue.length};
+      saveEvalBest();
+    }
+
+    const list = document.getElementById('eval-missed-list');
+    if(st.missed.length===0){
+      list.innerHTML = '<p>¡Ninguno! Acertaste los '+st.queue.length+' verbos de este bloque. 🎉</p>';
+    } else {
+      list.innerHTML = st.missed.map(function(v){
+        return '<div style="margin-bottom:.4rem;"><b>'+v.inf+'</b> ('+v.es+') — '+v.past+' / '+v.pp+' / '+v.ger+'</div>';
+      }).join('');
+    }
+  }
+
+  document.getElementById('eval-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    const mode = document.getElementById('eval-btn-check').dataset.mode;
+    if(mode==='next'){ evalAdvance(); } else { evalCheckAnswer(); }
+  });
+  document.getElementById('eval-btn-change-block').addEventListener('click', function(){
+    document.getElementById('eval-quiz').style.display='none';
+    document.getElementById('eval-picker').style.display='block';
+    renderBlockPicker();
+  });
+  document.getElementById('eval-btn-retry').addEventListener('click', function(){
+    startBlock(evalState.block);
+  });
+  document.getElementById('eval-btn-other-block').addEventListener('click', function(){
+    document.getElementById('eval-summary').style.display='none';
+    document.getElementById('eval-picker').style.display='block';
+    renderBlockPicker();
+  });
+
+  async function loadEvalBest(){
+    try{
+      if(window.storage){
+        const r = await window.storage.get('eval-best-scores', false);
+        if(r && r.value) evalBest = JSON.parse(r.value);
+      }
+    }catch(e){ evalBest = {}; }
+  }
+  async function saveEvalBest(){
+    try{
+      if(window.storage){
+        await window.storage.set('eval-best-scores', JSON.stringify(evalBest), false);
+      }
+    }catch(e){ /* storage unavailable, continue silently */ }
+  }
+  loadEvalBest().then(renderBlockPicker);
 
   /* ---------------- persistence ---------------- */
   async function loadProgress(){

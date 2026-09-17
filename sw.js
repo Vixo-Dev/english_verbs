@@ -1,4 +1,4 @@
-const CACHE_NAME = 'verb-lab-v3';
+const CACHE_NAME = 'verb-lab-v4';
 const ASSETS = [
   './',
   './index.html',

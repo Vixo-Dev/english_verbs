@@ -366,12 +366,18 @@
       </div>
     </section>
 
-    <!-- ===================== EVALUATION BY BLOCKS (irregular only) ===================== -->
+    <!-- ===================== EVALUATION BY BLOCKS (regular + irregular) ===================== -->
     <section id="view-eval" class="view">
-      <h2>Evaluación de verbos irregulares por bloques</h2>
-      <p class="hint">Elige un bloque de 50 verbos irregulares. Solo se te da el <b>significado en español</b>: tienes que recordar el verbo y escribir su <b>3ª persona</b>, <b>past simple</b>, <b>past participle</b> y <b>gerund</b>. Si te equivocas, te doy una pista con la regla o el patrón que sigue ese verbo.</p>
+      <h2>Evaluación por bloques</h2>
+      <p class="hint">Elige <b>regulares</b> o <b>irregulares</b> y luego un bloque de 50 verbos. Solo se te da el <b>significado en español</b>: tienes que recordar el verbo y escribir su <b>3ª persona</b>, <b>past simple</b>, <b>past participle</b> y <b>gerund</b>. Si te equivocas, te doy una pista con la regla o el patrón que sigue ese verbo.</p>
 
       <div id="eval-picker">
+        <div class="controls">
+          <div class="segmented" id="eval-pool-selector">
+            <button data-eval-pool="regular" class="active">Regulares</button>
+            <button data-eval-pool="irregular">Irregulares</button>
+          </div>
+        </div>
         <div class="block-picker" id="eval-block-buttons"></div>
       </div>
 
@@ -382,8 +388,8 @@
         </div>
 
         <div class="practice-card">
-          <span class="tag-chip irregular">irregular</span>
-          <div class="practice-inf" id="eval-es" style="font-size:1.5rem;">aguantar / soportar a alguien</div>
+          <span class="tag-chip regular" id="eval-tag">regular</span>
+          <div class="practice-inf" id="eval-es" style="font-size:1.5rem;">aceptar</div>
 
           <form class="practice-form" id="eval-form">
             <div class="field" id="eval-field-pres">
@@ -559,9 +565,21 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
   renderIrregularList('', false);
 
   /* ---------------- practice pool ---------------- */
+  // "roast / grill" -> alternate verbs ["grill"] -> alternate 3rd person ["grills"]
+  function thirdPersonOf(w){
+    if(/(s|x|z|ch|sh)$/.test(w)) return w+'es';
+    if(/[^aeiou]y$/.test(w)) return w.slice(0,-1)+'ies';
+    return w+'s';
+  }
+  function regularAltPres(d){
+    if(!d.inf_display || d.inf_display===d.inf) return [];
+    return d.inf_display.split('/').map(x=>x.trim()).filter(x=>x && x!==d.inf).map(thirdPersonOf);
+  }
+
   const pool = {
     regular: REGULAR.map(d=>({
-      key:'r:'+d.n, inf: d.inf_display||d.inf, es:d.es, type:'regular',
+      key:'r:'+d.n, inf: d.inf_display||d.inf, es:d.es, type:'regular', n:d.n,
+      pres:d.pres, altPres:regularAltPres(d),
       past:d.past, pp:d.past, altPast:d.altPast||[], altPP:d.altPast||[],
       ger:d.ger, altGer:d.altGer||[]
     })),
@@ -729,21 +747,29 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
     newVerb();
   });
 
-  /* ---------------- block evaluation (irregular verbs only, 50 at a time) ---------------- */
+  /* ---------------- block evaluation (regular + irregular verbs, 50 at a time) ---------------- */
   const BLOCK_SIZE = 50;
-  const evalPool = pool.irregular; // already excludes defective verbs like the modal "can"
-  const evalMaxN = evalPool.reduce((m,v)=> Math.max(m, v.n||0), 0);
-  const evalBlocks = [];
-  for(let start=1; start<=evalMaxN; start+=BLOCK_SIZE){
-    const end = Math.min(start+BLOCK_SIZE-1, evalMaxN);
-    evalBlocks.push({start, end, key:start+'-'+end});
+  function buildBlocks(list, keyPrefix){
+    const maxN = list.reduce((m,v)=> Math.max(m, v.n||0), 0);
+    const blocks = [];
+    for(let start=1; start<=maxN; start+=BLOCK_SIZE){
+      const end = Math.min(start+BLOCK_SIZE-1, maxN);
+      blocks.push({start, end, key:keyPrefix+start+'-'+end});
+    }
+    return blocks;
   }
+  // Irregular keys stay as "1-50" so scores saved before regulars existed keep working.
+  const EVAL_SETS = {
+    regular:   { list: pool.regular,   blocks: buildBlocks(pool.regular, 'r:') },
+    irregular: { list: pool.irregular, blocks: buildBlocks(pool.irregular, '') }   // already excludes defective verbs like the modal "can"
+  };
+  let evalSetName = 'regular';
 
   let evalBest = {};    // blockKey -> {correct, total}
-  let evalState = null; // {block, queue, pos, correct, missed}
+  let evalState = null; // {setName, block, queue, pos, correct, missed}
 
-  function evalVerbsInBlock(block){
-    return evalPool.filter(v => v.n>=block.start && v.n<=block.end);
+  function evalVerbsInBlock(setName, block){
+    return EVAL_SETS[setName].list.filter(v => v.n>=block.start && v.n<=block.end);
   }
   function shuffle(arr){
     const a = arr.slice();
@@ -757,9 +783,9 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
   function renderBlockPicker(){
     const wrap = document.getElementById('eval-block-buttons');
     wrap.innerHTML='';
-    evalBlocks.forEach(block=>{
+    EVAL_SETS[evalSetName].blocks.forEach(block=>{
       const btn = document.createElement('button');
-      const count = evalVerbsInBlock(block).length;
+      const count = evalVerbsInBlock(evalSetName, block).length;
       const best = evalBest[block.key];
       btn.innerHTML = 'Verbos '+block.start+'–'+block.end+
         (best ? '<span class="best">Mejor: '+best.correct+'/'+best.total+'</span>'
@@ -770,7 +796,11 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
   }
 
   function startBlock(block){
-    evalState = { block, queue: shuffle(evalVerbsInBlock(block)), pos:0, correct:0, missed:[] };
+    const setName = evalSetName;
+    evalState = { setName, block, queue: shuffle(evalVerbsInBlock(setName, block)), pos:0, correct:0, missed:[] };
+    const tag = document.getElementById('eval-tag');
+    tag.textContent = setName;
+    tag.className = 'tag-chip '+setName;
     document.getElementById('eval-picker').style.display='none';
     document.getElementById('eval-summary').style.display='none';
     document.getElementById('eval-quiz').style.display='block';
@@ -794,6 +824,62 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
     if(/[^aeiou][aeiou][^aeiouwxy]$/.test(head)) return 'Termina en consonante-vocal-consonante → se duplica la última consonante y se agrega -ing.';
     if(/[^aeiou]y$/.test(head)) return 'Termina en y → la y NO cambia, solo se agrega -ing.';
     return 'Regla general: solo se agrega -ing al final.';
+  }
+
+  /* ----- hints for REGULAR verbs: the rule is read off the actual answer in the data ----- */
+  function headWord(x){ return String(x||'').split(' ')[0].toLowerCase(); }
+  function syllableCount(w){ return (w.match(/[aeiouy]+/g)||[]).length; }
+  const CVC_END = /[^aeiou][aeiou][^aeiouwxy]$/;
+
+  // Explains why the final consonant IS doubled (past and gerund share this).
+  function doublingTip(h, suffix){
+    if(h==='program') return "Excepción: 'program' duplica la m ("+h+"m"+suffix+").";
+    if(syllableCount(h)===1) return 'Verbo corto que termina en consonante-vocal-consonante → se duplica la última consonante y se agrega -'+suffix+'.';
+    return 'Termina en consonante-vocal-consonante y el acento cae en la última sílaba → se duplica la consonante y se agrega -'+suffix+'.';
+  }
+  // Extra warning when a CVC-looking verb is NOT doubled.
+  function noDoubleNote(v, h, suffix, alts){
+    const last = h.slice(-1);
+    const uk = (alts||[]).find(a=> headWord(a)===h+last+suffix);
+    if(uk) return ' En inglés americano no se duplica la '+last+'; en británico sí ('+headWord(uk)+').';
+    if(CVC_END.test(h) && syllableCount(h)>1) return ' Aunque termina en consonante-vocal-consonante, la última sílaba no lleva el acento, así que NO se duplica la consonante.';
+    return '';
+  }
+
+  function regPresTip(v){
+    const h = headWord(v.inf), p = headWord(v.pres);
+    if(p===h+'es') return 'Termina en s, x, z, ch o sh → se agrega -es.';
+    if(/[^aeiou]y$/.test(h) && p===h.slice(0,-1)+'ies') return 'Termina en consonante + y → la y cambia a -ies.';
+    if(p===h+'s') return /[aeiou]y$/.test(h)
+      ? 'Termina en vocal + y → la y NO cambia, solo se agrega -s.'
+      : 'Regla general: solo se agrega -s al verbo.';
+    return "Excepción: memoriza «"+v.pres+"».";
+  }
+  function regPastTip(v){
+    const h = headWord(v.inf), p = headWord(v.past), last = h.slice(-1);
+    if(h.endsWith('e') && p===h+'d') return 'Termina en -e → solo se agrega -d.';
+    if(/[^aeiou]y$/.test(h) && p===h.slice(0,-1)+'ied') return 'Termina en consonante + y → la y cambia a -ied.';
+    if(p===h+last+'ed') return doublingTip(h,'ed');
+    if(p===h+'ed'){
+      if(/[aeiou]y$/.test(h)) return 'Termina en vocal + y → la y NO cambia, solo se agrega -ed.';
+      return 'Regla general: solo se agrega -ed al verbo.' + noDoubleNote(v, h, 'ed', v.altPast);
+    }
+    return "Excepción: aunque está en la lista de regulares, no sigue la regla del -ed. Memoriza «"+v.past+"».";
+  }
+  function regPPTip(v){
+    return 'En los verbos regulares el participio es igual al pasado. ' + regPastTip(v);
+  }
+  function regGerTip(v){
+    const h = headWord(v.inf), g = headWord(v.ger), last = h.slice(-1);
+    if(h.endsWith('ie') && g===h.slice(0,-2)+'ying') return "Termina en -ie → cambia a 'y' y se agrega -ing.";
+    if(/(ee|oe|ye)$/.test(h) && g===h+'ing') return 'Termina en -ee/-oe/-ye → NO se quita la e, solo se agrega -ing.';
+    if(h.endsWith('e') && g===h.slice(0,-1)+'ing') return 'Termina en -e muda → se quita la e y se agrega -ing.';
+    if(g===h+last+'ing') return doublingTip(h,'ing');
+    if(g===h+'ing'){
+      if(/y$/.test(h)) return 'Termina en y → la y NO cambia, solo se agrega -ing.';
+      return 'Regla general: solo se agrega -ing al final.' + noDoubleNote(v, h, 'ing', v.altGer);
+    }
+    return "Excepción: memoriza «"+v.ger+"».";
   }
 
   function renderEvalVerb(){
@@ -836,26 +922,29 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
     const userPP = document.getElementById('eval-input-pp').value;
     const userGer = document.getElementById('eval-input-ger').value;
 
-    const presOk = normLoose(userPres)===normLoose(v.pres) || v.altPres.some(a=>normLoose(userPres)===normLoose(a));
+    const presOk = normLoose(userPres)===normLoose(v.pres) || (v.altPres||[]).some(a=>normLoose(userPres)===normLoose(a));
     const pastOk = normLoose(userPast)===normLoose(v.past) || v.altPast.some(a=>normLoose(userPast)===normLoose(a));
     const ppOk = normLoose(userPP)===normLoose(v.pp) || v.altPP.some(a=>normLoose(userPP)===normLoose(a));
-    const gerOk = normLoose(userGer)===normLoose(v.ger);
+    const gerOk = normLoose(userGer)===normLoose(v.ger) || (v.altGer||[]).some(a=>normLoose(userGer)===normLoose(a));
 
-    evalSetFieldResult('pres', presOk, v.pres, presTip(v.inf));
-    evalSetFieldResult('past', pastOk, v.past, v.tip);
-    evalSetFieldResult('pp', ppOk, v.pp, v.tip);
-    evalSetFieldResult('ger', gerOk, v.ger, gerTip(v.inf));
+    const isReg = v.type==='regular';
+    // For regular verbs also show accepted variants (e.g. canceled / cancelled) when the answer was wrong.
+    const shown = (main, alts)=> isReg ? withAlts(main, alts) : main;
+    evalSetFieldResult('pres', presOk, shown(v.pres, v.altPres), isReg ? regPresTip(v) : presTip(v.inf));
+    evalSetFieldResult('past', pastOk, shown(v.past, v.altPast), isReg ? regPastTip(v) : v.tip);
+    evalSetFieldResult('pp',   ppOk,   shown(v.pp,   v.altPP),   isReg ? regPPTip(v)   : v.tip);
+    evalSetFieldResult('ger',  gerOk,  shown(v.ger,  v.altGer),  isReg ? regGerTip(v)  : gerTip(v.inf));
 
     const allOk = presOk && pastOk && ppOk && gerOk;
     const banner = document.getElementById('eval-result-banner');
     banner.classList.add('show');
     if(allOk){
       banner.classList.add('ok'); banner.classList.remove('bad');
-      banner.textContent='¡Correcto!';
+      banner.innerHTML='¡Correcto! El verbo era <b>'+v.inf+'</b>.';
       st.correct++;
     } else {
       banner.classList.add('bad'); banner.classList.remove('ok');
-      banner.textContent='Casi. Revisa las formas marcadas en rojo y la pista de abajo.';
+      banner.innerHTML='Casi. El verbo era <b>'+v.inf+'</b>. Revisa las formas marcadas en rojo y la pista de abajo.';
       st.missed.push(v);
     }
     document.getElementById('eval-correct').textContent = st.correct;
@@ -905,7 +994,16 @@ const IRREGULAR = [{"n": 1, "inf": "abide", "es": "aguantar / soportar a alguien
     renderBlockPicker();
   });
   document.getElementById('eval-btn-retry').addEventListener('click', function(){
+    evalSetName = evalState.setName;
     startBlock(evalState.block);
+  });
+  document.getElementById('eval-pool-selector').addEventListener('click', function(e){
+    const btn = e.target.closest('button[data-eval-pool]');
+    if(!btn) return;
+    this.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    evalSetName = btn.dataset.evalPool;
+    renderBlockPicker();
   });
   document.getElementById('eval-btn-other-block').addEventListener('click', function(){
     document.getElementById('eval-summary').style.display='none';
